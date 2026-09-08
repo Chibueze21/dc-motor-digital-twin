@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dc-motor-digital-twin"
+version = "0.1.0"
+description = "DC motor modeling, simulation, control, and digital twin development"
+requires-python = ">=3.12"
+
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
