@@ -37,3 +37,7 @@ CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 Makefile
+
+# Local scratch work
+notebooks/Untitled.ipynb
+scratch/
