@@ -224,69 +224,109 @@ def simulate(
     if initial_state is not None:
         x[0] = np.asarray(initial_state, dtype=float)
 
+    reference[0] = (
+        governed_reference(0.0)
+        if use_governor
+        else REFERENCE
+    )
+
+    def closed_loop_derivative(
+        ti: float,
+        xi: np.ndarray,
+        zi: float,
+    ) -> tuple[np.ndarray, float, float, float]:
+        ri = (
+            governed_reference(ti)
+            if use_governor
+            else REFERENCE
+        )
+
+        ui, uui = frozen_controller(
+            xi,
+            zi,
+            ri,
+        )
+
+        dxi = derivatives(
+            xi,
+            ui,
+            LOAD_TORQUE,
+            plant,
+        )
+
+        dzi = ri - xi[1]
+
+        return dxi, dzi, ui, uui
+
     for k in range(n_steps - 1):
         tk = t[k]
-        r = (
+
+        # Record controller values at the beginning of the step.
+        d1, dz1, u1, uu1 = closed_loop_derivative(
+            tk,
+            x[k],
+            z[k],
+        )
+
+        voltage[k] = u1
+        voltage_unsat[k] = uu1
+        reference[k] = (
             governed_reference(tk)
             if use_governor
             else REFERENCE
         )
 
-        reference[k] = r
-        voltage[k], voltage_unsat[k] = frozen_controller(
-            x[k], z[k], r
+        # RK4: evaluate the complete closed-loop dynamics at
+        # each RK4 substage, matching Experiment 10.
+        d2, dz2, _, _ = closed_loop_derivative(
+            tk + DT / 2.0,
+            x[k] + DT * d1 / 2.0,
+            z[k] + DT * dz1 / 2.0,
         )
 
-        # Integral state is frozen between solver steps.
-        def f(state, integral_state):
-            u, _ = frozen_controller(
-                state,
-                integral_state,
-                r,
-            )
-            return derivatives(
-                state,
-                u,
-                LOAD_TORQUE,
-                plant,
-            )
+        d3, dz3, _, _ = closed_loop_derivative(
+            tk + DT / 2.0,
+            x[k] + DT * d2 / 2.0,
+            z[k] + DT * dz2 / 2.0,
+        )
 
-        k1 = f(x[k], z[k])
-
-        z_mid_1 = z[k] + 0.5 * DT * (r - x[k, 1])
-        x_mid_1 = x[k] + 0.5 * DT * k1
-        k2 = f(x_mid_1, z_mid_1)
-
-        z_mid_2 = z[k] + 0.5 * DT * (r - x_mid_1[1])
-        x_mid_2 = x[k] + 0.5 * DT * k2
-        k3 = f(x_mid_2, z_mid_2)
-
-        z_end = z[k] + DT * (r - x_mid_2[1])
-        x_end = x[k] + DT * k3
-        k4 = f(x_end, z_end)
+        d4, dz4, _, _ = closed_loop_derivative(
+            tk + DT,
+            x[k] + DT * d3,
+            z[k] + DT * dz3,
+        )
 
         x[k + 1] = x[k] + (
             DT / 6.0
-        ) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+        ) * (
+            d1
+            + 2.0 * d2
+            + 2.0 * d3
+            + d4
+        )
 
         z[k + 1] = z[k] + (
             DT / 6.0
         ) * (
-            (r - x[k, 1])
-            + 2.0 * (r - x_mid_1[1])
-            + 2.0 * (r - x_mid_2[1])
-            + (r - x_end[1])
+            dz1
+            + 2.0 * dz2
+            + 2.0 * dz3
+            + dz4
         )
+
+    # Final recorded values.
+    dlast, dzlast, voltage[-1], voltage_unsat[-1] = (
+        closed_loop_derivative(
+            t[-1],
+            x[-1],
+            z[-1],
+        )
+    )
 
     reference[-1] = (
         governed_reference(t[-1])
         if use_governor
         else REFERENCE
-    )
-    voltage[-1], voltage_unsat[-1] = frozen_controller(
-        x[-1],
-        z[-1],
-        reference[-1],
     )
 
     return {
